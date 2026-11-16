@@ -19,8 +19,22 @@ def _load_env() -> None:
 
 def settings() -> tuple[str, str, str]:
     _load_env()
-    return (os.environ.get("LLM_BASE_URL") or "http://localhost:11434/v1",
-            os.environ.get("LLM_API_KEY", ""), os.environ.get("LLM_MODEL", ""))
+    base = os.environ.get("LLM_BASE_URL")
+    key = os.environ.get("LLM_API_KEY")
+    model = os.environ.get("LLM_MODEL")
+
+    # Fallback to Streamlit secrets when deployed on Streamlit Community Cloud
+    if not key or not model:
+        try:
+            import streamlit as st
+            if hasattr(st, "secrets"):
+                base = base or st.secrets.get("LLM_BASE_URL")
+                key = key or st.secrets.get("LLM_API_KEY")
+                model = model or st.secrets.get("LLM_MODEL")
+        except Exception:
+            pass
+
+    return (base or "http://localhost:11434/v1", key or "", model or "")
 
 
 def chat(messages: list[dict], **options) -> str:
