@@ -4,6 +4,7 @@ They start skipped. Remove the `skip` line as you work on each milestone.
 """
 import datetime as dt
 from decimal import Decimal
+import pandas as pd
 import pytest
 
 from app.core import (
@@ -11,8 +12,10 @@ from app.core import (
     InvalidTransactionError,
     RecurringTransaction,
     Transaction,
+    calculate_rfm,
     load,
     milestone_1,
+    milestone_2,
     save,
 )
 
@@ -47,9 +50,29 @@ def test_milestone_1(tmp_path):
 
 
 # Milestone 2: Add functionality to load transactions and preprocess for RFM features.
-@pytest.mark.skip(reason="remove this line when you start milestone 2")
-def test_milestone_2():
-    raise NotImplementedError("write the test for milestone 2")
+def test_milestone_2(tmp_path):
+    store_file = tmp_path / "test_rfm_budget.json"
+    milestone_1(path=store_file)
+
+    # 1. Run milestone_2 on the saved file
+    df_rfm = milestone_2(path=store_file)
+
+    # 2. Assert RFM dataframe structure and schema
+    assert isinstance(df_rfm, pd.DataFrame)
+    assert not df_rfm.empty
+    expected_cols = {"category", "recency", "frequency", "monetary", "recency_scaled", "frequency_scaled", "monetary_scaled"}
+    assert expected_cols.issubset(set(df_rfm.columns))
+
+    # 3. Assert values are logically bounded
+    assert (df_rfm["recency"] >= 0).all()
+    assert (df_rfm["frequency"] >= 1).all()
+    assert (df_rfm["monetary"] > 0).all()
+
+    # 4. Verify specific known aggregated metrics from default dataset
+    housing_row = df_rfm[df_rfm["category"] == "housing"]
+    assert not housing_row.empty
+    assert housing_row["frequency"].iloc[0] == 2
+    assert housing_row["monetary"].iloc[0] == 3000.00
 
 
 # Milestone 3: Implement K-Means from scratch to cluster spending patterns.

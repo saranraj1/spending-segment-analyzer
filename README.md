@@ -16,7 +16,7 @@ Tick these off as you go, and commit after each one.
 
 - [x] **1. Implement transaction tracking and saving to JSON.**  
       Hint: Use the object-oriented class hierarchy and JSON persistence from the budget drill.
-- [ ] **2. Add functionality to load transactions and preprocess for RFM features.**  
+- [x] **2. Add functionality to load transactions and preprocess for RFM features.**  
       Hint: Load the transaction data and engineer RFM features as demonstrated in the customer segmentation drill.
 - [ ] **3. Implement K-Means from scratch to cluster spending patterns.**  
       Hint: Implement the K-Means clustering algorithm from scratch, as covered in the customer segmentation drill.

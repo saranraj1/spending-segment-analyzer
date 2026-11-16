@@ -263,9 +263,92 @@ def milestone_1(transactions: list[Transaction] | None = None, path: str | Path 
     return account
 
 
+# ---------------------------------------------------------------------------
+# Milestone 2: RFM Feature Engineering (Customer Segmentation Drill)
+# ---------------------------------------------------------------------------
+
+def calculate_rfm(
+    transactions_or_account: Account | list[Transaction] | Path | str | None = None,
+    group_by: str = "category",
+    reference_date: dt.date | None = None,
+) -> pd.DataFrame:
+    """Preprocess transaction records into Recency, Frequency, and Monetary (RFM) features.
+
+    - Recency: Days elapsed since the last transaction in this segment.
+    - Frequency: Total count of transactions in this segment.
+    - Monetary: Total spending volume (positive magnitude).
+    """
+    txns: list[Transaction] = []
+
+    if isinstance(transactions_or_account, Account):
+        txns = list(transactions_or_account.transactions)
+    elif isinstance(transactions_or_account, (list, tuple)):
+        txns = list(transactions_or_account)
+    elif isinstance(transactions_or_account, (str, Path)):
+        load_res = load(transactions_or_account)
+        txns = list(load_res.account.transactions)
+    elif transactions_or_account is None:
+        target_path = Path(os.environ.get("DATA_PATH", "data/app.json"))
+        if target_path.exists():
+            txns = list(load(target_path).account.transactions)
+        if not txns:
+            account = milestone_1()
+            txns = list(account.transactions)
+
+    # Filter for expense transactions (spending analysis focuses on outflows)
+    expense_txns = [t for t in txns if t.amount < 0]
+    if not expense_txns:
+        expense_txns = txns
+
+    if not expense_txns:
+        return pd.DataFrame(columns=[group_by, "recency", "frequency", "monetary"])
+
+    # Determine reference date (defaults to most recent transaction date across dataset)
+    if reference_date is None:
+        reference_date = max(t.date for t in expense_txns)
+
+    # Aggregate by group (default: category)
+    records: dict[str, list[Transaction]] = {}
+    for t in expense_txns:
+        key = getattr(t, group_by, t.category)
+        records.setdefault(key, []).append(t)
+
+    rows = []
+    for key, group_txns in records.items():
+        latest_txn_date = max(t.date for t in group_txns)
+        recency = max(0, (reference_date - latest_txn_date).days)
+        frequency = len(group_txns)
+        monetary = float(sum(abs(t.amount) for t in group_txns))
+        rows.append({
+            group_by: key,
+            "recency": int(recency),
+            "frequency": int(frequency),
+            "monetary": round(monetary, 2),
+        })
+
+    df = pd.DataFrame(rows)
+
+    # Calculate standardized features for clustering (Z-score normalization)
+    for col in ["recency", "frequency", "monetary"]:
+        std = df[col].std()
+        if std and not np.isnan(std) and std != 0:
+            df[f"{col}_scaled"] = (df[col] - df[col].mean()) / std
+        else:
+            df[f"{col}_scaled"] = 0.0
+
+    return df.sort_values(by="monetary", ascending=False).reset_index(drop=True)
+
+
 # --- Milestone 2: Add functionality to load transactions and preprocess for RFM features.
-def milestone_2():  # TODO(milestone 2)
-    raise NotImplementedError("TODO(milestone 2)")
+def milestone_2(
+    path: str | Path | None = None,
+    transactions: list[Transaction] | None = None,
+    group_by: str = "category",
+    reference_date: dt.date | None = None,
+) -> pd.DataFrame:
+    """Load transactions and engineer RFM features as demonstrated in the customer segmentation drill."""
+    source = transactions if transactions is not None else path
+    return calculate_rfm(source, group_by=group_by, reference_date=reference_date)
 
 
 # --- Milestone 3: Implement K-Means from scratch to cluster spending patterns.
