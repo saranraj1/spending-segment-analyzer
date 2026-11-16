@@ -574,19 +574,22 @@ def compute_elbow_curve(
         model.fit(data)
         inertias.append(round(float(model.inertia_), 4))
 
-    # Detect elbow using maximum perpendicular distance to the chord connecting p1 and pn
+    # Detect elbow using maximum perpendicular distance to the chord connecting (k_min, I_max) to (k_max, I_min)
+    # Unit-normalizing axes to [0, 1] ensures scale-invariance regardless of inertia magnitude
     recommended_k = k_values[0]
     if len(k_values) >= 3:
-        p1 = np.array([float(k_values[0]), inertias[0]])
-        p2 = np.array([float(k_values[-1]), inertias[-1]])
-        line_vec = p2 - p1
-        line_len = np.linalg.norm(line_vec)
-        if line_len > 0:
+        k_min, k_max = float(k_values[0]), float(k_values[-1])
+        i_min, i_max = min(inertias), max(inertias)
+        k_range = k_max - k_min
+        i_range = i_max - i_min
+
+        if k_range > 0 and i_range > 0:
             distances = []
             for k, val in zip(k_values, inertias):
-                diff = np.array([float(k), val]) - p1
-                # 2D cross product scalar (ux*vy - uy*vx) avoids NumPy 2.0 2D cross deprecation
-                dist = abs(line_vec[0] * diff[1] - line_vec[1] * diff[0]) / line_len
+                kn = (float(k) - k_min) / k_range
+                vn = (float(val) - i_min) / i_range
+                # Perpendicular distance to unit diagonal x + y = 1: |x + y - 1| / sqrt(2)
+                dist = abs(kn + vn - 1.0) / np.sqrt(2.0)
                 distances.append(dist)
             recommended_k = k_values[int(np.argmax(distances))]
         else:
@@ -655,7 +658,8 @@ def simulate_counterfactual_intervention(
 
     # Standardize monetary using baseline (unperturbed) statistics
     orig_m_mean = df_rfm["monetary"].mean()
-    orig_m_std = df_rfm["monetary"].std(ddof=0) if df_rfm["monetary"].std(ddof=0) > 0 else 1.0
+    raw_m_std = df_rfm["monetary"].std()
+    orig_m_std = float(raw_m_std) if (pd.notna(raw_m_std) and raw_m_std > 0) else 1.0
 
     if "monetary_scaled" in sim_df.columns:
         sim_df["monetary_scaled"] = (sim_df["monetary"] - orig_m_mean) / orig_m_std

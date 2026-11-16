@@ -333,3 +333,50 @@ def test_simulate_counterfactual_intervention():
     assert zero_red["compounded_wealth"]["5_years"] == 0.0
 
 
+def test_mathematical_precision_and_annuity_accuracy():
+    import numpy as np
+
+    # 1. Decimal precision in Account
+    acc = Account("MathTest", allow_overdraft=True)
+    acc.add(Transaction(dt.date(2026, 1, 1), Decimal("1000.00"), "salary"))
+    acc.add(Transaction(dt.date(2026, 1, 2), Decimal("-123.45"), "dining"))
+    acc.add(Transaction(dt.date(2026, 1, 3), Decimal("-67.89"), "dining"))
+    acc.set_budget("dining", Decimal("200.00"))
+    assert acc.balance == Decimal("808.66")
+    assert acc.spent("dining", 2026, 1) == Decimal("191.34")
+
+    # 2. Exact theoretical K-Means inertia on 2 clusters
+    # Cluster 1: [0, 0], [0.1, 0] -> mean [0.05, 0], dist^2 = 2 * (0.05^2) = 0.005
+    # Cluster 2: [10, 10], [10, 10.1] -> mean [10, 10.05], dist^2 = 2 * (0.05^2) = 0.005
+    # Total expected inertia = 0.0100
+    points = np.array([[0.0, 0.0], [0.1, 0.0], [10.0, 10.0], [10.0, 10.1]])
+    model = KMeansScratch(k=2, random_state=42).fit(points)
+    assert abs(model.inertia_ - 0.01) < 1e-4
+
+    # 3. Exact theoretical annuity compounding check
+    # P = $100/mo, r = 7% annual, N = 12 months
+    # FV = 100 * ((1 + 0.07/12)^12 - 1) / (0.07/12)
+    p = 100.0
+    r_m = 0.07 / 12.0
+    expected_1yr_fv = p * (((1.0 + r_m) ** 12 - 1.0) / r_m)
+    expected_3yr_fv = p * (((1.0 + r_m) ** 36 - 1.0) / r_m)
+
+    df_synthetic = pd.DataFrame([{
+        "category": "dining",
+        "recency": 1,
+        "frequency": 2,
+        "monetary": 500.0,
+        "recency_scaled": 0.0,
+        "frequency_scaled": 0.0,
+        "monetary_scaled": 0.0,
+        "cluster": 0,
+        "segment_label": "Saver",
+    }])
+    # 20% of 500 = $100/mo
+    res = simulate_counterfactual_intervention(df_synthetic, "dining", 20.0, annual_return_rate=0.07)
+    assert abs(res["monthly_savings"] - 100.0) < 1e-4
+    assert abs(res["compounded_wealth"]["1_years"] - round(expected_1yr_fv, 2)) < 0.05
+    assert abs(res["compounded_wealth"]["3_years"] - round(expected_3yr_fv, 2)) < 0.05
+
+
+
