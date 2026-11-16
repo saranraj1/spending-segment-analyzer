@@ -351,9 +351,146 @@ def milestone_2(
     return calculate_rfm(source, group_by=group_by, reference_date=reference_date)
 
 
+# ---------------------------------------------------------------------------
+# Milestone 3: K-Means Clustering from Scratch (Customer Segmentation Drill)
+# ---------------------------------------------------------------------------
+
+class KMeansScratch:
+    """K-Means clustering implemented from scratch using NumPy vectorization.
+
+    Includes Expectation-Maximization iterative optimization, centroid updates,
+    convergence tolerances, and inertia tracking.
+    """
+
+    def __init__(self, k: int = 3, max_iter: int = 100, tol: float = 1e-4, random_state: int | None = 42):
+        self.k = k
+        self.max_iter = max_iter
+        self.tol = tol
+        self.random_state = random_state
+        self.centroids: np.ndarray | None = None
+        self.labels_: np.ndarray | None = None
+        self.inertia_: float = 0.0
+        self.n_iter_: int = 0
+
+    def fit(self, X: np.ndarray | pd.DataFrame) -> KMeansScratch:
+        if isinstance(X, pd.DataFrame):
+            data = X.to_numpy(dtype=float)
+        else:
+            data = np.asarray(X, dtype=float)
+
+        n_samples, n_features = data.shape
+        if n_samples == 0:
+            raise ValueError("Cannot fit KMeans on empty dataset.")
+
+        actual_k = min(self.k, n_samples)
+        rng = np.random.RandomState(self.random_state)
+
+        # Initialize centroids by randomly selecting unique sample indices
+        init_indices = rng.choice(n_samples, size=actual_k, replace=False)
+        self.centroids = data[init_indices].copy()
+
+        prev_centroids = self.centroids.copy()
+
+        for iteration in range(self.max_iter):
+            self.n_iter_ = iteration + 1
+            # Assignment step: calculate Euclidean distances to all centroids
+            # data: (N, D), centroids: (K, D) -> diffs: (N, K, D)
+            diffs = data[:, np.newaxis, :] - self.centroids[np.newaxis, :, :]
+            sq_dists = np.sum(diffs ** 2, axis=2)
+            self.labels_ = np.argmin(sq_dists, axis=1)
+
+            # Update step: compute mean for each cluster
+            new_centroids = np.zeros_like(self.centroids)
+            for cluster_idx in range(actual_k):
+                members = data[self.labels_ == cluster_idx]
+                if len(members) > 0:
+                    new_centroids[cluster_idx] = members.mean(axis=0)
+                else:
+                    # Re-seed empty cluster with a random sample to maintain k clusters
+                    new_centroids[cluster_idx] = data[rng.choice(n_samples)]
+
+            # Check convergence
+            centroid_shift = np.sum(np.linalg.norm(new_centroids - self.centroids, axis=1))
+            self.centroids = new_centroids
+
+            if centroid_shift <= self.tol:
+                break
+
+        # Calculate final inertia (sum of squared distances to closest centroid)
+        final_diffs = data[:, np.newaxis, :] - self.centroids[np.newaxis, :, :]
+        final_sq_dists = np.sum(final_diffs ** 2, axis=2)
+        closest_dist = np.min(final_sq_dists, axis=1)
+        self.inertia_ = float(np.sum(closest_dist))
+
+        return self
+
+    def predict(self, X: np.ndarray | pd.DataFrame) -> np.ndarray:
+        if self.centroids is None:
+            raise RuntimeError("Model must be fitted before predict.")
+        if isinstance(X, pd.DataFrame):
+            data = X.to_numpy(dtype=float)
+        else:
+            data = np.asarray(X, dtype=float)
+        diffs = data[:, np.newaxis, :] - self.centroids[np.newaxis, :, :]
+        sq_dists = np.sum(diffs ** 2, axis=2)
+        return np.argmin(sq_dists, axis=1)
+
+    def fit_predict(self, X: np.ndarray | pd.DataFrame) -> np.ndarray:
+        self.fit(X)
+        return self.labels_
+
+
+def assign_spending_personas(rfm_df: pd.DataFrame, cluster_col: str = "cluster") -> pd.DataFrame:
+    """Label clusters with meaningful financial habit personas (e.g. 'Foodie', 'Saver', 'Core Fixed')."""
+    df = rfm_df.copy()
+    if cluster_col not in df.columns:
+        df[cluster_col] = 0
+
+    cluster_stats = df.groupby(cluster_col)[["monetary", "frequency", "recency"]].mean()
+    persona_map = {}
+
+    median_monetary = df["monetary"].median() if not df.empty else 0
+    median_frequency = df["frequency"].median() if not df.empty else 0
+
+    for cluster_id, row in cluster_stats.iterrows():
+        m_val, f_val, r_val = row["monetary"], row["frequency"], row["recency"]
+        if m_val >= median_monetary and f_val >= median_frequency:
+            label = "High Volume / Core Lifestyle"
+        elif m_val >= median_monetary and f_val < median_frequency:
+            label = "Major Outflow / Fixed Bill"
+        elif m_val < median_monetary and f_val >= median_frequency:
+            label = "Frequent Micro-Spender (Foodie/Daily)"
+        else:
+            label = "Low Spend / Budget Saver"
+        persona_map[cluster_id] = label
+
+    df["segment_label"] = df[cluster_col].map(persona_map).fillna("General Spender")
+    return df
+
+
 # --- Milestone 3: Implement K-Means from scratch to cluster spending patterns.
-def milestone_3():  # TODO(milestone 3)
-    raise NotImplementedError("TODO(milestone 3)")
+def milestone_3(
+    df_rfm: pd.DataFrame | None = None,
+    k: int = 3,
+    random_state: int = 42,
+) -> tuple[KMeansScratch, pd.DataFrame]:
+    """Cluster spending patterns using K-Means implemented from scratch."""
+    if df_rfm is None or df_rfm.empty:
+        df_rfm = milestone_2()
+
+    df = df_rfm.copy()
+    feature_cols = [c for c in ["recency_scaled", "frequency_scaled", "monetary_scaled"] if c in df.columns]
+    if not feature_cols:
+        feature_cols = ["recency", "frequency", "monetary"]
+
+    feature_matrix = df[feature_cols].to_numpy(dtype=float)
+    actual_k = min(k, len(df)) if len(df) > 0 else 1
+
+    model = KMeansScratch(k=actual_k, random_state=random_state)
+    df["cluster"] = model.fit_predict(feature_matrix)
+    df = assign_spending_personas(df, cluster_col="cluster")
+
+    return model, df
 
 
 # --- Milestone 4: Display budget summary and identified spending segments in Streamlit.

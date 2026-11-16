@@ -18,7 +18,7 @@ Tick these off as you go, and commit after each one.
       Hint: Use the object-oriented class hierarchy and JSON persistence from the budget drill.
 - [x] **2. Add functionality to load transactions and preprocess for RFM features.**  
       Hint: Load the transaction data and engineer RFM features as demonstrated in the customer segmentation drill.
-- [ ] **3. Implement K-Means from scratch to cluster spending patterns.**  
+- [x] **3. Implement K-Means from scratch to cluster spending patterns.**  
       Hint: Implement the K-Means clustering algorithm from scratch, as covered in the customer segmentation drill.
 - [ ] **4. Display budget summary and identified spending segments in Streamlit.**  
       Hint: Integrate the budget summary and identified segments into a user-friendly Streamlit interface.
