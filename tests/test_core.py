@@ -15,6 +15,7 @@ from app.core import (
     Transaction,
     calculate_rfm,
     delete_transaction,
+    generate_planner_report,
     get_budget_summary,
     get_spending_trends,
     load,
@@ -202,4 +203,24 @@ def test_edge_cases_and_empty_scenarios():
     # 6. Delete transaction invalid index handling
     assert delete_transaction(empty_acc, 99) is False
     assert delete_transaction(empty_acc, -1) is False
+
+
+def test_kmeans_plus_plus_and_report_generation():
+    # 1. Verify KMeans++ initialization
+    import numpy as np
+    data = np.array([[1.0, 1.0], [1.1, 1.2], [50.0, 50.0], [51.0, 49.5]])
+    km_pp = KMeansScratch(k=2, init="k-means++", random_state=42).fit(data)
+    assert km_pp.labels_[0] == km_pp.labels_[1]
+    assert km_pp.labels_[2] == km_pp.labels_[3]
+    assert km_pp.labels_[0] != km_pp.labels_[2]
+
+    # 2. Verify planner memo report generation
+    acc = milestone_1()
+    summary = milestone_4(account=acc, k=3)
+    memo = generate_planner_report(acc, summary)
+    assert isinstance(memo, str)
+    assert "Executive Cashflow Overview" in memo
+    assert "Category Budget Utilization" in memo
+    assert "Spending Habit Archetypes" in memo
+    assert f"${summary['balance']:,.2f}" in memo
 

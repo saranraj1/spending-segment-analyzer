@@ -365,15 +365,43 @@ class KMeansScratch:
     convergence tolerances, and inertia tracking.
     """
 
-    def __init__(self, k: int = 3, max_iter: int = 100, tol: float = 1e-4, random_state: int | None = 42):
+    def __init__(
+        self,
+        k: int = 3,
+        max_iter: int = 100,
+        tol: float = 1e-4,
+        random_state: int | None = 42,
+        init: str = "k-means++",
+    ):
         self.k = k
         self.max_iter = max_iter
         self.tol = tol
         self.random_state = random_state
+        self.init = init
         self.centroids: np.ndarray | None = None
         self.labels_: np.ndarray | None = None
         self.inertia_: float = 0.0
         self.n_iter_: int = 0
+
+    def _init_centroids(self, data: np.ndarray, actual_k: int, rng: np.random.RandomState) -> np.ndarray:
+        n_samples = len(data)
+        if self.init == "k-means++" and n_samples >= actual_k:
+            centroids = np.empty((actual_k, data.shape[1]), dtype=float)
+            first_idx = rng.choice(n_samples)
+            centroids[0] = data[first_idx]
+            for c_idx in range(1, actual_k):
+                diffs = data[:, np.newaxis, :] - centroids[:c_idx][np.newaxis, :, :]
+                sq_dists = np.min(np.sum(diffs ** 2, axis=2), axis=1)
+                total_dist = np.sum(sq_dists)
+                if total_dist > 0:
+                    probs = sq_dists / total_dist
+                    next_idx = rng.choice(n_samples, p=probs)
+                else:
+                    next_idx = rng.choice(n_samples)
+                centroids[c_idx] = data[next_idx]
+            return centroids
+        init_indices = rng.choice(n_samples, size=actual_k, replace=False)
+        return data[init_indices].copy()
 
     def fit(self, X: np.ndarray | pd.DataFrame) -> KMeansScratch:
         if isinstance(X, pd.DataFrame):
@@ -390,12 +418,7 @@ class KMeansScratch:
 
         actual_k = min(self.k, n_samples)
         rng = np.random.RandomState(self.random_state)
-
-        # Initialize centroids by randomly selecting unique sample indices
-        init_indices = rng.choice(n_samples, size=actual_k, replace=False)
-        self.centroids = data[init_indices].copy()
-
-        prev_centroids = self.centroids.copy()
+        self.centroids = self._init_centroids(data, actual_k, rng)
 
         for iteration in range(self.max_iter):
             self.n_iter_ = iteration + 1
@@ -611,4 +634,52 @@ def milestone_4(
     summary = get_budget_summary(account, clustered_df)
     summary["segments_df"] = clustered_df
     summary["spending_trends"] = get_spending_trends(account)
+    summary["memo_markdown"] = generate_planner_report(account, summary)
     return summary
+
+
+def generate_planner_report(account: Account, summary: dict[str, Any]) -> str:
+    """Generate a clean Markdown decision memo for financial planners to share with clients."""
+    lines = [
+        f"# Client Budget & Spending Segment Memo",
+        f"**Portfolio**: {account.name} | **Generated**: {dt.date.today().isoformat()}",
+        "",
+        "## 1. Executive Cashflow Overview",
+        f"- **Current Net Balance**: ${summary.get('balance', 0.0):,.2f}",
+        f"- **Total Monthly Inflows**: ${summary.get('total_income', 0.0):,.2f}",
+        f"- **Total Monthly Outflows**: ${summary.get('total_expenses', 0.0):,.2f}",
+        f"- **Recorded Transactions**: {summary.get('transaction_count', 0)}",
+        f"- **Categories Exceeding Budget**: {summary.get('over_budget_count', 0)}",
+        "",
+        "## 2. Category Budget Utilization",
+        "| Category | Budget Limit | Actual Spent | Remaining | Utilization % | Status |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- |",
+    ]
+    for c in summary.get("category_summaries", []):
+        status = "⚠️ OVER BUDGET" if c["over_budget"] else "✅ Healthy"
+        lines.append(
+            f"| {c['category'].capitalize()} | ${c['budget']:,.2f} | ${c['spent']:,.2f} | ${c['remaining']:,.2f} | {c['utilization_pct']}% | {status} |"
+        )
+
+    lines.extend([
+        "",
+        "## 3. Spending Habit Archetypes (RFM Clustering)",
+    ])
+    df_seg = summary.get("segments_df")
+    if df_seg is not None and not df_seg.empty and "segment_label" in df_seg.columns:
+        for cluster_id in sorted(df_seg["cluster"].unique()):
+            sub = df_seg[df_seg["cluster"] == cluster_id]
+            persona = sub["segment_label"].iloc[0]
+            cats = ", ".join(sub["category"].tolist())
+            lines.append(
+                f"- **Cluster {cluster_id} ({persona})**: Categories: `{cats}` (Avg Outflow: ${sub['monetary'].mean():,.2f})"
+            )
+    else:
+        lines.append("- No expense cluster data recorded.")
+
+    lines.extend([
+        "",
+        "---",
+        "*Spending Segment Analyzer — askthili.in Financial Engineering Track*",
+    ])
+    return "\n".join(lines)

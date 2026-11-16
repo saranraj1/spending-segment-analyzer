@@ -3,8 +3,9 @@
 Spending Segment Analyzer for financial planners:
 - Tracks client expenses with crash-resilient JSON persistence.
 - Preprocesses transactions for RFM (Recency, Frequency, Monetary) features.
-- Clusters spending patterns using K-Means from scratch.
-- Visualizes budget summaries, spending archetypes, and temporal trends.
+- Clusters spending patterns using K-Means from scratch (K-Means++ initialization).
+- Visualizes budget summaries, spending archetypes, 2D scatter cluster maps, and temporal trends.
+- Exports formatted Markdown decision memos and CSV reports for client advisory.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import datetime as dt
 from decimal import Decimal
 import os
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -22,6 +24,7 @@ from app.core import (
     BudgetExceededError,
     Transaction,
     delete_transaction,
+    generate_planner_report,
     get_budget_summary,
     get_spending_trends,
     load,
@@ -88,7 +91,7 @@ k_clusters = st.sidebar.slider(
     min_value=2,
     max_value=5,
     value=3,
-    help="Target clusters for K-Means algorithm implemented from scratch.",
+    help="Target clusters for K-Means algorithm implemented from scratch with K-Means++ initialization.",
 )
 
 st.sidebar.markdown("---")
@@ -149,6 +152,8 @@ with st.sidebar.form("budget_form", clear_on_submit=True):
             except Exception as exc:
                 st.sidebar.error(f"Error setting budget: {exc}")
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("📥 Export & Reset")
 if st.sidebar.button("🔄 Reset to Sample Data"):
     account = milestone_1(path=DATA_FILE)
     st.session_state.account = account
@@ -159,6 +164,15 @@ if st.sidebar.button("🔄 Reset to Sample Data"):
 summary_data = milestone_4(account=account, path=DATA_FILE, k=k_clusters)
 df_segments: pd.DataFrame = summary_data["segments_df"]
 df_trends: pd.DataFrame = summary_data["spending_trends"]
+
+# Sidebar quick download for client decision memo
+memo_text = summary_data.get("memo_markdown", generate_planner_report(account, summary_data))
+st.sidebar.download_button(
+    "📄 Download Client Memo",
+    data=memo_text,
+    file_name=f"{account.name.lower().replace(' ', '_')}_memo.md",
+    mime="text/markdown",
+)
 
 # --- Top Level Metrics ---
 col1, col2, col3, col4 = st.columns(4)
@@ -223,7 +237,7 @@ with tab_segments:
     st.write(
         "Transactions are preprocessed into **Recency** (days since last purchase), "
         "**Frequency** (count of transactions), and **Monetary** (aggregate spend), "
-        "then clustered using our pure NumPy **K-Means from Scratch** algorithm."
+        "then clustered using our pure NumPy **K-Means from Scratch** algorithm (with K-Means++ centroid initialization)."
     )
 
     if not df_segments.empty and "cluster" in df_segments.columns:
@@ -236,10 +250,24 @@ with tab_segments:
             table_view.columns = [c.replace("_", " ").title() for c in show_cols]
             display_dataframe(table_view)
 
+            # Export button for CSV
+            st.download_button(
+                "📥 Export RFM Segments (CSV)",
+                data=df_segments.to_csv(index=False).encode("utf-8"),
+                file_name="rfm_spending_segments.csv",
+                mime="text/csv",
+            )
+
         with col_chart:
-            st.markdown("#### Spending Habits Cluster Distribution")
-            chart_data = df_segments.set_index("category")[["monetary", "recency"]]
-            st.bar_chart(chart_data)
+            st.markdown("#### 2D Cluster Space: Recency vs. Monetary Outflow")
+            st.caption("Point color indicates assigned Persona; point size scales with transaction Frequency.")
+            st.scatter_chart(
+                df_segments,
+                x="recency",
+                y="monetary",
+                color="segment_label",
+                size="frequency",
+            )
 
         st.markdown("#### Identified Client Spending Personas")
         for cluster_id in sorted(df_segments["cluster"].unique()):
@@ -296,6 +324,14 @@ with tab_txns:
         df_ledger = pd.DataFrame(txn_records)
         display_dataframe(df_ledger)
 
+        st.download_button(
+            "📥 Export Transaction Ledger (CSV)",
+            data=df_ledger.to_csv(index=False).encode("utf-8"),
+            file_name="transactions_ledger.csv",
+            mime="text/csv",
+        )
+
+        st.markdown("---")
         st.markdown("#### 🗑️ Delete Transaction")
         del_idx = st.selectbox(
             "Select transaction to remove",
