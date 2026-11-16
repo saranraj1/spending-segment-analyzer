@@ -59,6 +59,8 @@ The codebase is split into core financial logic and presentation:
    - Export options for Markdown planner memos and CSV datasets.
    - Optional AI advisor integration using configured LLM endpoints.
 
+Detailed derivations and justifications for all formulas are documented in [MATHEMATICAL_SPECIFICATIONS.md](MATHEMATICAL_SPECIFICATIONS.md).
+
 ## Project Structure
 
 ```
@@ -75,6 +77,7 @@ spending-segment-analyzer/
 │   └── test_smoke.py   # Baseline verification tests
 ├── pytest.ini          # Pytest configuration
 ├── requirements.txt    # Project dependencies
+├── MATHEMATICAL_SPECIFICATIONS.md # Detailed mathematical formulations and derivations
 └── README.md
 ```
 
