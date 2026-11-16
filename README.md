@@ -47,3 +47,10 @@ reaches GitHub, treat it as leaked and make a new one.
 
 - [x] Allow financial planners to edit or delete existing transactions.
 - [x] Implement a feature to visualize spending trends over different time periods.
+
+## Advanced Mathematical Features & Behavioral Interventions
+
+- **K-Means++ & Elbow Method Optimization**: Implements distance-proportional $D(x)^2$ centroid seeding and mathematical cluster inflection detection via secant chord distance (`compute_elbow_curve`).
+- **Prescriptive "What-If" Counterfactual Intervention Engine**: Simulates client spending reductions in target discretionary categories, projects habit persona migration across clusters without data leakage, and models multi-year annuity wealth compounding ($FV = P \times \frac{(1+r)^n - 1}{r}$) at configurable portfolio returns.
+- **Client Decision Memo Export**: Generates exportable Markdown advisory memos and CSV datasets for client review.
+- **AI Financial Advisor**: Integrated with Groq cloud LLMs for contextual portfolio advice.

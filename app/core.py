@@ -531,6 +531,173 @@ def milestone_3(
     return model, df
 
 
+def compute_elbow_curve(
+    df_rfm: pd.DataFrame,
+    max_k: int = 5,
+    random_state: int = 42,
+) -> dict[str, Any]:
+    """Calculate inertia for k in range 1..max_k and determine recommended k using the elbow method.
+
+    Uses standard chord-distance (Kneedle algorithm) to locate the maximum inflection point.
+    """
+    if df_rfm.empty:
+        return {
+            "k_values": [],
+            "inertias": [],
+            "elbow_df": pd.DataFrame(columns=["k", "inertia"]),
+            "recommended_k": 1,
+        }
+
+    feature_cols = [c for c in ["recency_scaled", "frequency_scaled", "monetary_scaled"] if c in df_rfm.columns]
+    if not feature_cols:
+        feature_cols = [c for c in ["recency", "frequency", "monetary"] if c in df_rfm.columns]
+
+    if not feature_cols:
+        return {
+            "k_values": [1],
+            "inertias": [0.0],
+            "elbow_df": pd.DataFrame([{"k": 1, "inertia": 0.0}]),
+            "recommended_k": 1,
+        }
+
+    data = df_rfm[feature_cols].to_numpy(dtype=float)
+    n_samples = len(data)
+    upper_k = min(max_k, n_samples)
+    if upper_k < 1:
+        upper_k = 1
+
+    k_values = list(range(1, upper_k + 1))
+    inertias: list[float] = []
+
+    for k in k_values:
+        model = KMeansScratch(k=k, init="k-means++", random_state=random_state)
+        model.fit(data)
+        inertias.append(round(float(model.inertia_), 4))
+
+    # Detect elbow using maximum perpendicular distance to the chord connecting p1 and pn
+    recommended_k = k_values[0]
+    if len(k_values) >= 3:
+        p1 = np.array([float(k_values[0]), inertias[0]])
+        p2 = np.array([float(k_values[-1]), inertias[-1]])
+        line_vec = p2 - p1
+        line_len = np.linalg.norm(line_vec)
+        if line_len > 0:
+            distances = []
+            for k, val in zip(k_values, inertias):
+                diff = np.array([float(k), val]) - p1
+                # 2D cross product scalar (ux*vy - uy*vx) avoids NumPy 2.0 2D cross deprecation
+                dist = abs(line_vec[0] * diff[1] - line_vec[1] * diff[0]) / line_len
+                distances.append(dist)
+            recommended_k = k_values[int(np.argmax(distances))]
+        else:
+            recommended_k = k_values[0]
+    elif len(k_values) == 2:
+        recommended_k = 2 if inertias[0] > inertias[1] else 1
+
+    elbow_df = pd.DataFrame({"k": k_values, "inertia": inertias})
+
+    return {
+        "k_values": k_values,
+        "inertias": inertias,
+        "elbow_df": elbow_df,
+        "recommended_k": recommended_k,
+    }
+
+
+def simulate_counterfactual_intervention(
+    df_rfm: pd.DataFrame,
+    category: str,
+    spend_reduction_pct: float,
+    model: KMeansScratch | None = None,
+    annual_return_rate: float = 0.07,
+) -> dict[str, Any]:
+    """Prescriptive behavioral intervention simulator.
+
+    Calculates counterfactual RFM coordinates if spending in `category` is reduced by
+    `spend_reduction_pct` (e.g. 0.20 or 20.0). Projects cluster migration, persona shifts,
+    and long-term compounded wealth accumulation at the given annual return rate.
+    """
+    if df_rfm.empty:
+        raise ValueError("Cannot simulate counterfactual intervention on empty RFM data.")
+
+    pct = spend_reduction_pct / 100.0 if spend_reduction_pct > 1.0 else spend_reduction_pct
+    pct = max(0.0, min(1.0, float(pct)))
+
+    matched = df_rfm[df_rfm["category"] == category]
+    if matched.empty:
+        raise ValueError(f"Category '{category}' not found in RFM data.")
+
+    cat_row = matched.iloc[0]
+    orig_monetary = float(cat_row["monetary"])
+    orig_freq = float(cat_row["frequency"])
+    orig_rec = float(cat_row["recency"])
+
+    counterfactual_monetary = round(orig_monetary * (1.0 - pct), 2)
+    saved_amount = round(orig_monetary - counterfactual_monetary, 2)
+
+    monthly_savings = saved_amount
+    annual_savings = round(monthly_savings * 12.0, 2)
+
+    # Future value of monthly annuity: FV = P * [((1 + r/12)^(12*n) - 1) / (r/12)]
+    r_monthly = annual_return_rate / 12.0
+    compounded: dict[str, float] = {}
+    for years in [1, 3, 5, 10, 20]:
+        n_periods = years * 12
+        if r_monthly > 0:
+            fv = monthly_savings * (((1.0 + r_monthly) ** n_periods - 1.0) / r_monthly)
+        else:
+            fv = monthly_savings * n_periods
+        compounded[f"{years}_years"] = round(float(fv), 2)
+
+    # Clone and perturb target category
+    sim_df = df_rfm.copy()
+    sim_df.loc[sim_df["category"] == category, "monetary"] = counterfactual_monetary
+
+    # Standardize monetary using baseline (unperturbed) statistics
+    orig_m_mean = df_rfm["monetary"].mean()
+    orig_m_std = df_rfm["monetary"].std(ddof=0) if df_rfm["monetary"].std(ddof=0) > 0 else 1.0
+
+    if "monetary_scaled" in sim_df.columns:
+        sim_df["monetary_scaled"] = (sim_df["monetary"] - orig_m_mean) / orig_m_std
+
+    feature_cols = [c for c in ["recency_scaled", "frequency_scaled", "monetary_scaled"] if c in sim_df.columns]
+    if not feature_cols:
+        feature_cols = ["recency", "frequency", "monetary"]
+
+    if model is None or model.centroids is None or len(model.centroids) == 0:
+        actual_k = min(3, len(df_rfm))
+        model = KMeansScratch(k=actual_k, init="k-means++", random_state=42)
+        model.fit(df_rfm[feature_cols].to_numpy(dtype=float))
+
+    sim_matrix = sim_df[feature_cols].to_numpy(dtype=float)
+    sim_df["cluster"] = model.predict(sim_matrix)
+    sim_df = assign_spending_personas(sim_df, cluster_col="cluster")
+
+    orig_cluster = int(matched["cluster"].iloc[0]) if "cluster" in matched.columns else 0
+    orig_persona = str(matched["segment_label"].iloc[0]) if "segment_label" in matched.columns else "Unclassified"
+
+    new_cat_row = sim_df[sim_df["category"] == category].iloc[0]
+    new_cluster = int(new_cat_row["cluster"])
+    new_persona = str(new_cat_row["segment_label"])
+
+    return {
+        "category": category,
+        "spend_reduction_pct": round(pct * 100.0, 1),
+        "original_monetary": orig_monetary,
+        "counterfactual_monetary": counterfactual_monetary,
+        "saved_monetary": saved_amount,
+        "monthly_savings": monthly_savings,
+        "annual_savings": annual_savings,
+        "original_cluster": orig_cluster,
+        "counterfactual_cluster": new_cluster,
+        "original_persona": orig_persona,
+        "counterfactual_persona": new_persona,
+        "cluster_migrated": orig_cluster != new_cluster,
+        "compounded_wealth": compounded,
+        "counterfactual_rfm_df": sim_df,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Milestone 4: Budget Summary, Spending Segments & Trends
 # ---------------------------------------------------------------------------
@@ -634,6 +801,7 @@ def milestone_4(
     summary = get_budget_summary(account, clustered_df)
     summary["segments_df"] = clustered_df
     summary["spending_trends"] = get_spending_trends(account)
+    summary["elbow_analysis"] = compute_elbow_curve(clustered_df)
     summary["memo_markdown"] = generate_planner_report(account, summary)
     return summary
 

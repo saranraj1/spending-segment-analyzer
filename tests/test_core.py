@@ -14,6 +14,7 @@ from app.core import (
     RecurringTransaction,
     Transaction,
     calculate_rfm,
+    compute_elbow_curve,
     delete_transaction,
     generate_planner_report,
     get_budget_summary,
@@ -24,6 +25,7 @@ from app.core import (
     milestone_3,
     milestone_4,
     save,
+    simulate_counterfactual_intervention,
 )
 
 # Milestone 1: Implement transaction tracking and saving to JSON.
@@ -249,4 +251,85 @@ def test_pipeline_with_completely_arbitrary_custom_data(tmp_path):
     summary = milestone_4(account=acc, k=2)
     assert summary["transaction_count"] == 4
     assert summary["total_expenses"] == 1775.00
+
+
+def test_compute_elbow_curve():
+    # 1. Standard dataset elbow computation
+    df_rfm = milestone_2()
+    assert not df_rfm.empty
+
+    elbow_data = compute_elbow_curve(df_rfm, max_k=5)
+    assert "k_values" in elbow_data
+    assert "inertias" in elbow_data
+    assert "elbow_df" in elbow_data
+    assert "recommended_k" in elbow_data
+
+    k_vals = elbow_data["k_values"]
+    inertias = elbow_data["inertias"]
+    assert len(k_vals) >= 3
+    assert len(inertias) == len(k_vals)
+    # Inertia should be monotonically decreasing or non-increasing with k
+    for i in range(1, len(inertias)):
+        assert inertias[i] <= inertias[i - 1] + 1e-4
+
+    assert 1 <= elbow_data["recommended_k"] <= len(k_vals)
+
+    # 2. Edge case: Empty DataFrame
+    empty_elbow = compute_elbow_curve(pd.DataFrame())
+    assert empty_elbow["recommended_k"] == 1
+    assert empty_elbow["inertias"] == []
+
+    # 3. Edge case: Single-row DataFrame
+    single_row = df_rfm.head(1)
+    single_elbow = compute_elbow_curve(single_row, max_k=4)
+    assert single_elbow["recommended_k"] == 1
+    assert len(single_elbow["k_values"]) == 1
+
+
+def test_simulate_counterfactual_intervention():
+    # 1. Standard intervention scenario
+    df_rfm = milestone_2()
+    model, clustered = milestone_3(df_rfm=df_rfm, k=3)
+
+    result = simulate_counterfactual_intervention(
+        df_rfm=clustered,
+        category="dining",
+        spend_reduction_pct=25.0,
+        model=model,
+        annual_return_rate=0.07,
+    )
+
+    assert result["category"] == "dining"
+    assert result["spend_reduction_pct"] == 25.0
+    assert result["counterfactual_monetary"] < result["original_monetary"]
+    assert result["saved_monetary"] > 0
+    assert result["monthly_savings"] == result["saved_monetary"]
+    assert result["annual_savings"] == round(result["monthly_savings"] * 12.0, 2)
+
+    # Verify compounding produces positive wealth and outpaces simple linear sum due to interest
+    cw = result["compounded_wealth"]
+    assert cw["1_years"] > 0
+    assert cw["3_years"] > result["annual_savings"] * 3  # Compounding at 7% exceeds pure cash savings
+    assert cw["10_years"] > cw["5_years"] > cw["3_years"]
+
+    # Verify modified dataframe reflects counterfactual state
+    sim_df = result["counterfactual_rfm_df"]
+    dining_row = sim_df[sim_df["category"] == "dining"].iloc[0]
+    assert dining_row["monetary"] == result["counterfactual_monetary"]
+
+    # 2. Edge cases
+    # Nonexistent category
+    with pytest.raises(ValueError, match="not found in RFM data"):
+        simulate_counterfactual_intervention(clustered, "nonexistent_cryptocurrency", 20.0)
+
+    # Empty DataFrame
+    with pytest.raises(ValueError, match="Cannot simulate counterfactual"):
+        simulate_counterfactual_intervention(pd.DataFrame(), "dining", 20.0)
+
+    # Zero percent reduction
+    zero_red = simulate_counterfactual_intervention(clustered, "dining", 0.0)
+    assert zero_red["monthly_savings"] == 0.0
+    assert zero_red["annual_savings"] == 0.0
+    assert zero_red["compounded_wealth"]["5_years"] == 0.0
+
 

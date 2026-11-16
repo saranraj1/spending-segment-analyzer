@@ -23,6 +23,7 @@ from app.core import (
     Account,
     BudgetExceededError,
     Transaction,
+    compute_elbow_curve,
     delete_transaction,
     generate_planner_report,
     get_budget_summary,
@@ -33,6 +34,7 @@ from app.core import (
     milestone_3,
     milestone_4,
     save,
+    simulate_counterfactual_intervention,
 )
 
 st.set_page_config(
@@ -189,9 +191,10 @@ col4.metric(
 st.markdown("---")
 
 # --- Tabs for Dashboard Views ---
-tab_budget, tab_segments, tab_trends, tab_txns = st.tabs([
+tab_budget, tab_segments, tab_rebalancer, tab_trends, tab_txns = st.tabs([
     "📊 Budget Summary (M1 & M4)",
     "🎯 RFM & Habit Segments (M2 & M3)",
+    "🔮 What-If Rebalancer & Optimal-k",
     "📈 Spending Trends (Stretch 2)",
     "📝 Transaction Ledger (M1 & Stretch 1)",
 ])
@@ -314,7 +317,108 @@ with tab_segments:
     else:
         st.info("No expense data available for RFM clustering.")
 
-# --- TAB 3: Spending Trends ---
+# --- TAB 3: What-If Rebalancer & Optimal-k ---
+with tab_rebalancer:
+    st.subheader("🔮 Prescriptive Behavioral Rebalancer & Optimal-k Discovery")
+    st.caption(
+        "Move beyond descriptive past spending. Use mathematical optimization to find the natural cluster count, "
+        "and simulate prescriptive 'What-If' interventions that quantify habit migration and future wealth compounding."
+    )
+
+    col_elbow, col_sim = st.columns([1, 1], gap="large")
+
+    with col_elbow:
+        st.markdown("#### 1. Mathematical Cluster Optimization (Elbow Curve)")
+        st.write(
+            "Evaluates intra-cluster inertia (sum of squared Euclidean errors) across $k \\in [1, 5]$ "
+            "using K-Means++ initialization."
+        )
+        elbow_res = summary_data.get("elbow_analysis", compute_elbow_curve(df_segments))
+        elbow_df = elbow_res.get("elbow_df", pd.DataFrame())
+        rec_k = elbow_res.get("recommended_k", 1)
+
+        if not elbow_df.empty:
+            display_line_chart(elbow_df.set_index("k")[["inertia"]])
+            st.success(f"🎯 **Mathematically Recommended $k$**: **{rec_k}** (detected via maximum chord inflection distance)")
+            st.caption(f"Current dashboard cluster parameter is set to $k={k_clusters}$.")
+        else:
+            st.info("Insufficient data to compute elbow curve.")
+
+    with col_sim:
+        st.markdown("#### 2. 'What-If' Behavioral Intervention Simulator")
+        if not df_segments.empty and "category" in df_segments.columns:
+            categories = sorted(df_segments["category"].tolist())
+            chosen_cat = st.selectbox("Target Expense Category to Rebalance", options=categories)
+            reduction_pct = st.slider(
+                "Simulated Spending Reduction (%)",
+                min_value=5,
+                max_value=60,
+                value=20,
+                step=5,
+                help="Simulate the client reducing discretionary outflow in this category.",
+            )
+            return_rate = st.slider(
+                "Assumed Portfolio Annual Return (CAGR %)",
+                min_value=4.0,
+                max_value=12.0,
+                value=7.0,
+                step=0.5,
+                help="Historical conservative equity portfolio real return rate (e.g. S&P 500 / broad index fund).",
+            )
+
+            # Run counterfactual simulation
+            sim_res = simulate_counterfactual_intervention(
+                df_rfm=df_segments,
+                category=chosen_cat,
+                spend_reduction_pct=reduction_pct,
+                annual_return_rate=return_rate / 100.0,
+            )
+
+            st.markdown("##### 💡 Projected Impact & Habit Persona Migration")
+            c_m1, c_m2 = st.columns(2)
+            c_m1.metric(
+                "Monthly Cashflow Recovered",
+                f"+${sim_res['monthly_savings']:,.2f}/mo",
+                delta=f"-{reduction_pct}% spend",
+                delta_color="normal",
+            )
+            c_m2.metric(
+                "Annual Capital Redirected",
+                f"+${sim_res['annual_savings']:,.2f}/yr",
+            )
+
+            orig_p = sim_res["original_persona"]
+            new_p = sim_res["counterfactual_persona"]
+            if sim_res["cluster_migrated"]:
+                st.warning(
+                    f"🔄 **Habit Persona Shift**: Category `{chosen_cat}` successfully migrates from "
+                    f"**Cluster {sim_res['original_cluster']} ({orig_p})** ➔ **Cluster {sim_res['counterfactual_cluster']} ({new_p})**!"
+                )
+            else:
+                st.info(
+                    f"📌 Category `{chosen_cat}` remains in **Cluster {sim_res['counterfactual_cluster']} ({new_p})** "
+                    f"with improved budget buffer."
+                )
+
+            st.markdown("##### 📈 Wealth Compounding Timeline (Future Value of Savings)")
+            cw = sim_res["compounded_wealth"]
+            compounding_records = [
+                {"Horizon": "1 Year", "Projected Wealth ($)": cw["1_years"]},
+                {"Horizon": "3 Years", "Projected Wealth ($)": cw["3_years"]},
+                {"Horizon": "5 Years", "Projected Wealth ($)": cw["5_years"]},
+                {"Horizon": "10 Years", "Projected Wealth ($)": cw["10_years"]},
+                {"Horizon": "20 Years", "Projected Wealth ($)": cw["20_years"]},
+            ]
+            df_comp = pd.DataFrame(compounding_records)
+            display_dataframe(df_comp)
+            st.caption(
+                r"Formula: $FV = P \times \frac{(1 + r/12)^{12n} - 1}{r/12}$"
+                + f" at {return_rate}% annual return."
+            )
+        else:
+            st.info("Record expense transactions to enable What-If simulation.")
+
+# --- TAB 4: Spending Trends ---
 with tab_trends:
     st.subheader("Historical Spending Trends Over Time (Stretch Goal 2)")
     if not df_trends.empty:
@@ -327,7 +431,7 @@ with tab_trends:
     else:
         st.info("No expense history recorded yet to build trends.")
 
-# --- TAB 4: Transaction Ledger & Deletion ---
+# --- TAB 5: Transaction Ledger & Deletion ---
 with tab_txns:
     st.subheader("Transaction Ledger & Management (Stretch Goal 1)")
     txns = list(account.transactions)
