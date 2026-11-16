@@ -1,0 +1,8 @@
+streamlit
+httpx
+pytest
+thilibudget @ git+https://github.com/thili-ai/thilibudget.git
+scikit-learn
+numpy
+pandas
+joblib
