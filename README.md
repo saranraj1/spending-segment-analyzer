@@ -1,6 +1,6 @@
-# Spending Segment Analyzer
-
 [![Built with askThili](https://ask.thili.ai/api/v1/public/projects/jdkgcprg6k/badge.svg)](https://ask.thili.ai/b/jdkgcprg6k)
+
+# Spending Segment Analyzer
 
 A Streamlit application for financial planners to record client transactions, analyze spending patterns using RFM feature engineering, and segment habits using K-Means clustering implemented from scratch.
 
