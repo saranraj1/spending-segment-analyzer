@@ -224,3 +224,29 @@ def test_kmeans_plus_plus_and_report_generation():
     assert "Spending Habit Archetypes" in memo
     assert f"${summary['balance']:,.2f}" in memo
 
+
+def test_pipeline_with_completely_arbitrary_custom_data(tmp_path):
+    # Verify that the entire pipeline is 100% dynamic and works with arbitrary categories/dates/amounts
+    custom_txns = [
+        Transaction(dt.date(2025, 6, 1), Decimal("-150.00"), "cloud_compute", "AWS hosting"),
+        Transaction(dt.date(2025, 6, 5), Decimal("-350.00"), "cloud_compute", "GPU instance"),
+        Transaction(dt.date(2025, 6, 10), Decimal("-75.00"), "domain_registry", "DNS fees"),
+        Transaction(dt.date(2025, 6, 15), Decimal("-1200.00"), "payroll_contractor", "Design work"),
+    ]
+    custom_store = tmp_path / "custom.json"
+    acc = milestone_1(transactions=custom_txns, path=custom_store)
+    assert len(acc.transactions) == 4
+
+    df_rfm = milestone_2(transactions=custom_txns)
+    assert set(df_rfm["category"]) == {"cloud_compute", "domain_registry", "payroll_contractor"}
+    assert df_rfm.loc[df_rfm["category"] == "cloud_compute", "frequency"].iloc[0] == 2
+    assert df_rfm.loc[df_rfm["category"] == "cloud_compute", "monetary"].iloc[0] == 500.00
+
+    model, clustered = milestone_3(df_rfm=df_rfm, k=2)
+    assert len(clustered) == 3
+    assert "cluster" in clustered.columns
+
+    summary = milestone_4(account=acc, k=2)
+    assert summary["transaction_count"] == 4
+    assert summary["total_expenses"] == 1775.00
+

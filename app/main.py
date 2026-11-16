@@ -289,6 +289,28 @@ with tab_segments:
                         st.success("💡 **Financial Planner Recommendation:** High savings adherence. Safe to allocate surplus toward investment goals.")
                     else:
                         st.info("💡 **Financial Planner Recommendation:** Core operational spending. Review quarterly for efficiency.")
+
+        st.markdown("#### 🤖 AI Financial Advisor (Groq-Powered)")
+        if st.button("Generate AI Advisory Analysis", help="Queries the configured LLM for personalized client recommendations"):
+            with st.spinner("Consulting AI advisor..."):
+                try:
+                    from app import llm
+                    base, key, model = llm.settings()
+                    if not key or not model:
+                        st.info("To enable live AI insights, provide your LLM_API_KEY and LLM_MODEL in .env.")
+                    else:
+                        summary_rows = [f"- {r['category']}: ${r['monetary']:,.2f} ({r['segment_label']})" for _, r in df_segments.iterrows()]
+                        prompt = (
+                            f"You are a fiduciary financial planner. Review these client expense segments:\n"
+                            + "\n".join(summary_rows) + "\n\n"
+                            f"Total Outflow: ${summary_data['total_expenses']:,.2f}, Balance: ${summary_data['balance']:,.2f}.\n"
+                            f"Provide 3 concise, high-impact, actionable recommendations to improve client budgeting."
+                        )
+                        ai_reply = llm.chat([{"role": "user", "content": prompt}], max_tokens=250)
+                        st.success("AI Financial Analysis:")
+                        st.markdown(ai_reply)
+                except Exception as exc:
+                    st.warning(f"AI Advisor unavailable ({exc}). Relying on standard rule-based heuristics.")
     else:
         st.info("No expense data available for RFM clustering.")
 
