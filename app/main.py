@@ -42,8 +42,24 @@ st.set_page_config(
 DATA_FILE = Path(os.environ.get("DATA_PATH", "data/app.json"))
 
 
+def display_dataframe(df: pd.DataFrame, **kwargs) -> None:
+    """Helper to render DataFrames cleanly across both modern and legacy Streamlit versions."""
+    try:
+        st.dataframe(df, width="stretch", **kwargs)
+    except TypeError:
+        st.dataframe(df, use_container_width=True, **kwargs)
+
+
+def display_line_chart(data: Any, **kwargs) -> None:
+    """Helper to render line charts cleanly across Streamlit versions."""
+    try:
+        st.line_chart(data, width="stretch", **kwargs)
+    except TypeError:
+        st.line_chart(data, use_container_width=True, **kwargs)
+
+
 def load_current_account() -> Account:
-    """Load account from disk or initialize if missing."""
+    """Load account from disk or initialize with baseline data."""
     if DATA_FILE.exists():
         result = load(DATA_FILE)
         if result.account.transactions:
@@ -86,28 +102,32 @@ with st.sidebar.form("add_txn_form", clear_on_submit=True):
     txn_desc = st.text_input("Description", placeholder="e.g. Client dinner")
     submitted = st.form_submit_button("Record Transaction")
 
-    if submitted and txn_category.strip():
-        amt = -Decimal(str(txn_amount)) if txn_type == "Expense" else Decimal(str(txn_amount))
-        try:
-            new_txn = Transaction(
-                date=txn_date,
-                amount=amt,
-                category=txn_category.strip().lower(),
-                description=txn_desc.strip(),
-            )
+    if submitted:
+        cat_clean = txn_category.strip().lower()
+        if not cat_clean:
+            st.sidebar.error("Category name cannot be empty.")
+        else:
+            amt = -Decimal(str(txn_amount)) if txn_type == "Expense" else Decimal(str(txn_amount))
             try:
-                account.add(new_txn)
-            except BudgetExceededError as budget_err:
-                # Still record the historical expense, notify planner of budget overrun
-                account.add_many([new_txn], enforce_limits=False)
-                st.sidebar.warning(f"Recorded expense, but note: {budget_err}")
+                new_txn = Transaction(
+                    date=txn_date,
+                    amount=amt,
+                    category=cat_clean,
+                    description=txn_desc.strip(),
+                )
+                try:
+                    account.add(new_txn)
+                except BudgetExceededError as budget_err:
+                    # Still record historical outflow and warn planner
+                    account.add_many([new_txn], enforce_limits=False)
+                    st.sidebar.warning(f"Recorded expense, but note: {budget_err}")
 
-            save(account, DATA_FILE)
-            st.session_state.account = account
-            st.sidebar.success(f"Recorded {txn_category} transaction!")
-            st.rerun()
-        except Exception as exc:
-            st.sidebar.error(f"Failed to record transaction: {exc}")
+                save(account, DATA_FILE)
+                st.session_state.account = account
+                st.sidebar.success(f"Recorded {cat_clean} transaction!")
+                st.rerun()
+            except Exception as exc:
+                st.sidebar.error(f"Failed to record transaction: {exc}")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎯 Set Category Budget")
@@ -115,15 +135,19 @@ with st.sidebar.form("budget_form", clear_on_submit=True):
     b_category = st.text_input("Category", placeholder="e.g., dining")
     b_limit = st.number_input("Monthly Limit ($)", min_value=1.0, value=300.0, step=25.0)
     b_submit = st.form_submit_button("Set Budget")
-    if b_submit and b_category.strip():
-        try:
-            account.set_budget(b_category.strip().lower(), Decimal(str(b_limit)))
-            save(account, DATA_FILE)
-            st.session_state.account = account
-            st.sidebar.success(f"Budget for '{b_category}' set to ${b_limit:,.2f}")
-            st.rerun()
-        except Exception as exc:
-            st.sidebar.error(f"Error setting budget: {exc}")
+    if b_submit:
+        b_cat_clean = b_category.strip().lower()
+        if not b_cat_clean:
+            st.sidebar.error("Category cannot be empty.")
+        else:
+            try:
+                account.set_budget(b_cat_clean, Decimal(str(b_limit)))
+                save(account, DATA_FILE)
+                st.session_state.account = account
+                st.sidebar.success(f"Budget for '{b_cat_clean}' set to ${b_limit:,.2f}")
+                st.rerun()
+            except Exception as exc:
+                st.sidebar.error(f"Error setting budget: {exc}")
 
 if st.sidebar.button("🔄 Reset to Sample Data"):
     account = milestone_1(path=DATA_FILE)
@@ -171,10 +195,10 @@ with tab_budget:
         display_df.columns = [
             "Category", "Monthly Budget ($)", "Actual Spent ($)", "Remaining ($)", "Utilization (%)", "Assigned Persona", "Over Budget?"
         ]
-        st.dataframe(display_df, use_container_width=True)
+        display_dataframe(display_df)
 
         st.markdown("#### Budget Utilization Meters")
-        meter_cols = st.columns(min(len(cat_summaries), 3))
+        meter_cols = st.columns(min(max(len(cat_summaries), 1), 3))
         for idx, item in enumerate(cat_summaries):
             col = meter_cols[idx % 3]
             with col:
@@ -185,7 +209,7 @@ with tab_budget:
                 st.write(f"**{cat_name}**: ${spent_val:,.2f} of ${budget_val:,.2f} limit")
                 st.progress(util_pct / 100.0)
                 if item["over_budget"]:
-                    st.caption("🚨 :red[Over budget by $" f"{spent_val - budget_val:,.2f}]")
+                    st.caption(f"🚨 :red[Over budget by ${spent_val - budget_val:,.2f}]")
                 elif budget_val > 0:
                     st.caption(f"✅ {item['utilization_pct']}% utilized (${item['remaining']:,.2f} remaining)")
                 else:
@@ -202,7 +226,7 @@ with tab_segments:
         "then clustered using our pure NumPy **K-Means from Scratch** algorithm."
     )
 
-    if not df_segments.empty:
+    if not df_segments.empty and "cluster" in df_segments.columns:
         col_table, col_chart = st.columns([1, 1])
 
         with col_table:
@@ -210,7 +234,7 @@ with tab_segments:
             show_cols = [c for c in ["category", "recency", "frequency", "monetary", "cluster", "segment_label"] if c in df_segments.columns]
             table_view = df_segments[show_cols].copy()
             table_view.columns = [c.replace("_", " ").title() for c in show_cols]
-            st.dataframe(table_view, use_container_width=True)
+            display_dataframe(table_view)
 
         with col_chart:
             st.markdown("#### Spending Habits Cluster Distribution")
@@ -220,22 +244,23 @@ with tab_segments:
         st.markdown("#### Identified Client Spending Personas")
         for cluster_id in sorted(df_segments["cluster"].unique()):
             sub = df_segments[df_segments["cluster"] == cluster_id]
-            persona_name = sub["segment_label"].iloc[0]
-            cats = ", ".join(sub["category"].tolist())
-            avg_spend = sub["monetary"].mean()
-            avg_freq = sub["frequency"].mean()
+            if not sub.empty:
+                persona_name = sub["segment_label"].iloc[0]
+                cats = ", ".join(sub["category"].tolist())
+                avg_spend = sub["monetary"].mean()
+                avg_freq = sub["frequency"].mean()
 
-            with st.expander(f"Cluster {cluster_id}: {persona_name}", expanded=True):
-                st.write(f"**Categories in this habit group:** `{cats}`")
-                st.write(f"**Average Outflow:** `${avg_spend:,.2f}` | **Average Transaction Count:** `{avg_freq:.1f}`")
-                if "Foodie" in persona_name or "Micro-Spender" in persona_name:
-                    st.info("💡 **Financial Planner Recommendation:** Frequent low-ticket spending. Recommend setting weekly discretionary envelopes.")
-                elif "Major Outflow" in persona_name or "Fixed" in persona_name:
-                    st.warning("💡 **Financial Planner Recommendation:** High-ticket fixed expenses. Rebalance with automated savings buffers on payday.")
-                elif "Saver" in persona_name or "Low" in persona_name:
-                    st.success("💡 **Financial Planner Recommendation:** High savings adherence. Safe to allocate surplus toward investment goals.")
-                else:
-                    st.info("💡 **Financial Planner Recommendation:** Core operational spending. Review quarterly for efficiency.")
+                with st.expander(f"Cluster {cluster_id}: {persona_name}", expanded=True):
+                    st.write(f"**Categories in this habit group:** `{cats}`")
+                    st.write(f"**Average Outflow:** `${avg_spend:,.2f}` | **Average Transaction Count:** `{avg_freq:.1f}`")
+                    if "Foodie" in persona_name or "Micro-Spender" in persona_name:
+                        st.info("💡 **Financial Planner Recommendation:** Frequent low-ticket spending. Recommend setting weekly discretionary envelopes.")
+                    elif "Major Outflow" in persona_name or "Fixed" in persona_name:
+                        st.warning("💡 **Financial Planner Recommendation:** High-ticket fixed expenses. Rebalance with automated savings buffers on payday.")
+                    elif "Saver" in persona_name or "Low" in persona_name:
+                        st.success("💡 **Financial Planner Recommendation:** High savings adherence. Safe to allocate surplus toward investment goals.")
+                    else:
+                        st.info("💡 **Financial Planner Recommendation:** Core operational spending. Review quarterly for efficiency.")
     else:
         st.info("No expense data available for RFM clustering.")
 
@@ -245,10 +270,10 @@ with tab_trends:
     if not df_trends.empty:
         st.write("Visualizing cumulative outflows and transaction chronology across time periods.")
         trend_plot_df = df_trends.set_index("date")[["cumulative_spend"]]
-        st.line_chart(trend_plot_df, use_container_width=True)
+        display_line_chart(trend_plot_df)
 
         st.markdown("#### Outflows by Date")
-        st.dataframe(df_trends[["date", "category", "amount", "cumulative_spend", "description"]], use_container_width=True)
+        display_dataframe(df_trends[["date", "category", "amount", "cumulative_spend", "description"]])
     else:
         st.info("No expense history recorded yet to build trends.")
 
@@ -269,7 +294,7 @@ with tab_txns:
                 "Description": t.description,
             })
         df_ledger = pd.DataFrame(txn_records)
-        st.dataframe(df_ledger, use_container_width=True)
+        display_dataframe(df_ledger)
 
         st.markdown("#### 🗑️ Delete Transaction")
         del_idx = st.selectbox(

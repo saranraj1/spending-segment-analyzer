@@ -301,7 +301,10 @@ def calculate_rfm(
         expense_txns = txns
 
     if not expense_txns:
-        return pd.DataFrame(columns=[group_by, "recency", "frequency", "monetary"])
+        return pd.DataFrame(columns=[
+            group_by, "recency", "frequency", "monetary",
+            "recency_scaled", "frequency_scaled", "monetary_scaled"
+        ])
 
     # Determine reference date (defaults to most recent transaction date across dataset)
     if reference_date is None:
@@ -380,7 +383,10 @@ class KMeansScratch:
 
         n_samples, n_features = data.shape
         if n_samples == 0:
-            raise ValueError("Cannot fit KMeans on empty dataset.")
+            self.centroids = np.empty((0, n_features))
+            self.labels_ = np.empty((0,), dtype=int)
+            self.inertia_ = 0.0
+            return self
 
         actual_k = min(self.k, n_samples)
         rng = np.random.RandomState(self.random_state)
@@ -431,6 +437,8 @@ class KMeansScratch:
             data = X.to_numpy(dtype=float)
         else:
             data = np.asarray(X, dtype=float)
+        if len(data) == 0 or len(self.centroids) == 0:
+            return np.empty((0,), dtype=int)
         diffs = data[:, np.newaxis, :] - self.centroids[np.newaxis, :, :]
         sq_dists = np.sum(diffs ** 2, axis=2)
         return np.argmin(sq_dists, axis=1)
@@ -475,10 +483,17 @@ def milestone_3(
     random_state: int = 42,
 ) -> tuple[KMeansScratch, pd.DataFrame]:
     """Cluster spending patterns using K-Means implemented from scratch."""
-    if df_rfm is None or df_rfm.empty:
+    if df_rfm is None:
         df_rfm = milestone_2()
 
     df = df_rfm.copy()
+    if df.empty:
+        df["cluster"] = pd.Series(dtype=int)
+        df["segment_label"] = pd.Series(dtype=str)
+        model = KMeansScratch(k=1, random_state=random_state)
+        model.fit(np.empty((0, 3)))
+        return model, df
+
     feature_cols = [c for c in ["recency_scaled", "frequency_scaled", "monetary_scaled"] if c in df.columns]
     if not feature_cols:
         feature_cols = ["recency", "frequency", "monetary"]
@@ -585,7 +600,7 @@ def milestone_4(
     if account is None:
         if target_path.exists():
             account = load(target_path).account
-        if not account or not account.transactions:
+        else:
             account = milestone_1(path=target_path)
 
     # Compute RFM & K-Means segments

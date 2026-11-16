@@ -169,3 +169,37 @@ def test_stretch_features(tmp_path):
     assert "cumulative_spend" in df_trends.columns
     assert (df_trends["cumulative_spend"] > 0).all()
 
+
+def test_edge_cases_and_empty_scenarios():
+    # 1. Empty account handling
+    empty_acc = Account("Empty Test")
+    assert empty_acc.balance == Decimal(0)
+    assert len(empty_acc.transactions) == 0
+
+    # 2. RFM preprocessing on empty account
+    empty_rfm = calculate_rfm(empty_acc)
+    assert isinstance(empty_rfm, pd.DataFrame)
+    assert empty_rfm.empty
+    assert "monetary" in empty_rfm.columns
+
+    # 3. K-Means clustering on empty DataFrame
+    model, clustered_empty = milestone_3(df_rfm=empty_rfm, k=3)
+    assert isinstance(model, KMeansScratch)
+    assert "cluster" in clustered_empty.columns
+    assert "segment_label" in clustered_empty.columns
+
+    # 4. Milestone 4 summary on empty account
+    summary = milestone_4(account=empty_acc)
+    assert summary["balance"] == 0.0
+    assert summary["total_expenses"] == 0.0
+    assert summary["transaction_count"] == 0
+    assert summary["over_budget_count"] == 0
+
+    # 5. Empty spending trends
+    empty_trends = get_spending_trends(empty_acc)
+    assert empty_trends.empty
+
+    # 6. Delete transaction invalid index handling
+    assert delete_transaction(empty_acc, 99) is False
+    assert delete_transaction(empty_acc, -1) is False
+
