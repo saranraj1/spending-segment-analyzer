@@ -14,7 +14,7 @@ This project creates a Spending Segment Analyzer, a Streamlit application design
 
 Tick these off as you go, and commit after each one.
 
-- [ ] **1. Implement transaction tracking and saving to JSON.**  
+- [x] **1. Implement transaction tracking and saving to JSON.**  
       Hint: Use the object-oriented class hierarchy and JSON persistence from the budget drill.
 - [ ] **2. Add functionality to load transactions and preprocess for RFM features.**  
       Hint: Load the transaction data and engineer RFM features as demonstrated in the customer segmentation drill.
