@@ -20,7 +20,7 @@ Tick these off as you go, and commit after each one.
       Hint: Load the transaction data and engineer RFM features as demonstrated in the customer segmentation drill.
 - [x] **3. Implement K-Means from scratch to cluster spending patterns.**  
       Hint: Implement the K-Means clustering algorithm from scratch, as covered in the customer segmentation drill.
-- [ ] **4. Display budget summary and identified spending segments in Streamlit.**  
+- [x] **4. Display budget summary and identified spending segments in Streamlit.**  
       Hint: Integrate the budget summary and identified segments into a user-friendly Streamlit interface.
 
 ## Run it
@@ -45,5 +45,5 @@ reaches GitHub, treat it as leaked and make a new one.
 
 ## Stretch ideas
 
-- Allow financial planners to edit or delete existing transactions.
-- Implement a feature to visualize spending trends over different time periods.
+- [x] Allow financial planners to edit or delete existing transactions.
+- [x] Implement a feature to visualize spending trends over different time periods.

@@ -14,10 +14,14 @@ from app.core import (
     RecurringTransaction,
     Transaction,
     calculate_rfm,
+    delete_transaction,
+    get_budget_summary,
+    get_spending_trends,
     load,
     milestone_1,
     milestone_2,
     milestone_3,
+    milestone_4,
     save,
 )
 
@@ -110,7 +114,58 @@ def test_milestone_3(tmp_path):
 
 
 # Milestone 4: Display budget summary and identified spending segments in Streamlit.
-@pytest.mark.skip(reason="remove this line when you start milestone 4")
-def test_milestone_4():
-    raise NotImplementedError("write the test for milestone 4")
+def test_milestone_4(tmp_path):
+    store_file = tmp_path / "test_summary_budget.json"
+    account = milestone_1(path=store_file)
+
+    # 1. Run milestone_4 integration
+    summary = milestone_4(account=account, path=store_file, k=3)
+
+    # 2. Check contract keys required by Streamlit
+    assert "account_name" in summary
+    assert "balance" in summary
+    assert "total_income" in summary
+    assert "total_expenses" in summary
+    assert "category_summaries" in summary
+    assert "segments_df" in summary
+    assert "spending_trends" in summary
+
+    # 3. Check category breakdown calculations
+    cat_items = summary["category_summaries"]
+    assert len(cat_items) > 0
+    dining_summary = next(c for c in cat_items if c["category"] == "dining")
+    assert dining_summary["spent"] > 0
+    assert dining_summary["budget"] == 250.00
+    assert "segment_label" in dining_summary
+
+    # 4. Check over budget logic
+    # Add an expense with enforce_limits=False (simulating an actual statement overrun)
+    over_txn = Transaction(dt.date(2026, 3, 5), Decimal("-500.00"), "dining", "Expensive celebration")
+    account.add_many([over_txn], enforce_limits=False)
+    updated_summary = milestone_4(account=account, path=store_file, k=3)
+    updated_dining = next(c for c in updated_summary["category_summaries"] if c["category"] == "dining")
+    assert updated_dining["over_budget"] is True
+    assert updated_summary["over_budget_count"] >= 1
+
+
+# Stretch features test
+def test_stretch_features(tmp_path):
+    store_file = tmp_path / "test_stretch.json"
+    account = milestone_1(path=store_file)
+    initial_count = len(account.transactions)
+    initial_balance = account.balance
+
+    # Test Stretch 1: Delete transaction
+    first_txn_amt = account.transactions[0].amount
+    deleted = delete_transaction(account, 0)
+    assert deleted is True
+    assert len(account.transactions) == initial_count - 1
+    assert account.balance == initial_balance - first_txn_amt
+
+    # Test Stretch 2: Spending trends timeline
+    df_trends = get_spending_trends(account)
+    assert isinstance(df_trends, pd.DataFrame)
+    assert not df_trends.empty
+    assert "cumulative_spend" in df_trends.columns
+    assert (df_trends["cumulative_spend"] > 0).all()
 

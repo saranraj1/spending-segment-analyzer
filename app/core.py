@@ -493,6 +493,107 @@ def milestone_3(
     return model, df
 
 
+# ---------------------------------------------------------------------------
+# Milestone 4: Budget Summary, Spending Segments & Trends
+# ---------------------------------------------------------------------------
+
+def get_budget_summary(account: Account, clustered_df: pd.DataFrame | None = None) -> dict[str, Any]:
+    """Compile budget performance, category balances, and identified spending segments."""
+    txns = list(account.transactions)
+    total_income = float(sum((t.amount for t in txns if t.amount > 0), Decimal(0)))
+    total_expenses = float(sum((-t.amount for t in txns if t.amount < 0), Decimal(0)))
+    net_balance = float(account.balance)
+
+    # Calculate spending by category across all transactions
+    category_spent: dict[str, float] = {}
+    for t in txns:
+        if t.amount < 0:
+            category_spent[t.category] = category_spent.get(t.category, 0.0) + float(-t.amount)
+
+    # Budget comparisons
+    budgets = {cat: float(lim) for cat, lim in account.budgets.items()}
+    all_categories = sorted(set(list(category_spent.keys()) + list(budgets.keys())))
+
+    category_summaries = []
+    for cat in all_categories:
+        spent = round(category_spent.get(cat, 0.0), 2)
+        budget = round(budgets.get(cat, 0.0), 2)
+        remaining = round(budget - spent, 2) if budget > 0 else 0.0
+        utilization_pct = round((spent / budget) * 100, 1) if budget > 0 else 0.0
+        is_over_budget = budget > 0 and spent > budget
+
+        # Check if segment label exists for this category
+        segment = "Unclassified"
+        if clustered_df is not None and not clustered_df.empty and "category" in clustered_df.columns:
+            match = clustered_df[clustered_df["category"] == cat]
+            if not match.empty and "segment_label" in match.columns:
+                segment = match["segment_label"].iloc[0]
+
+        category_summaries.append({
+            "category": cat,
+            "budget": budget,
+            "spent": spent,
+            "remaining": remaining,
+            "utilization_pct": utilization_pct,
+            "over_budget": is_over_budget,
+            "segment_label": segment,
+        })
+
+    return {
+        "account_name": account.name,
+        "balance": net_balance,
+        "total_income": total_income,
+        "total_expenses": total_expenses,
+        "transaction_count": len(txns),
+        "category_summaries": category_summaries,
+        "over_budget_count": sum(1 for c in category_summaries if c["over_budget"]),
+    }
+
+
+def get_spending_trends(account: Account) -> pd.DataFrame:
+    """Helper for Stretch Idea 2: aggregate spending timeline over time."""
+    expense_txns = [t for t in account.transactions if t.amount < 0]
+    if not expense_txns:
+        return pd.DataFrame(columns=["date", "amount", "cumulative_spend", "category"])
+
+    sorted_txns = sorted(expense_txns, key=lambda t: t.date)
+    records = []
+    cumulative = 0.0
+    for t in sorted_txns:
+        amt = float(-t.amount)
+        cumulative += amt
+        records.append({
+            "date": t.date.isoformat(),
+            "amount": amt,
+            "cumulative_spend": round(cumulative, 2),
+            "category": t.category,
+            "description": t.description,
+        })
+
+    return pd.DataFrame(records)
+
+
 # --- Milestone 4: Display budget summary and identified spending segments in Streamlit.
-def milestone_4():  # TODO(milestone 4)
-    raise NotImplementedError("TODO(milestone 4)")
+def milestone_4(
+    account: Account | None = None,
+    path: str | Path | None = None,
+    k: int = 3,
+) -> dict[str, Any]:
+    """Display budget summary and identified spending segments for Streamlit integration."""
+    target_path = Path(path or os.environ.get("DATA_PATH", "data/app.json"))
+
+    if account is None:
+        if target_path.exists():
+            account = load(target_path).account
+        if not account or not account.transactions:
+            account = milestone_1(path=target_path)
+
+    # Compute RFM & K-Means segments
+    df_rfm = milestone_2(transactions=list(account.transactions))
+    _, clustered_df = milestone_3(df_rfm=df_rfm, k=k)
+
+    # Generate full budget summary dictionary
+    summary = get_budget_summary(account, clustered_df)
+    summary["segments_df"] = clustered_df
+    summary["spending_trends"] = get_spending_trends(account)
+    return summary
